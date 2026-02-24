@@ -95,6 +95,15 @@ env:
 
 The remote is named `nrp`. Inside k8s pods, the config is mounted from `rclone-config` secret — no additional setup needed.
 
+Ceph S3 (and other non-AWS endpoints like minio) require two non-default options in `rclone.conf`:
+
+```ini
+provider = Other
+force_path_style = true
+```
+
+Without these, rclone uses virtual-hosted URLs which Ceph does not support.
+
 ## Bucket Management
 
 ### Creating a bucket
