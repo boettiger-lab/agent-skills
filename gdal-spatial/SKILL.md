@@ -1,6 +1,6 @@
 ---
 name: gdal-spatial
-description: "Work with geospatial data using GDAL/OGR, especially reading remote files via virtual filesystems (/vsicurl/, /vsis3/), inspecting multi-layer sources, converting between formats, and handling geometry edge cases. Covers when to use GDAL vs DuckDB spatial, and how GDAL's VSI layer enables remote access. Use when working with geospatial file formats (GDB, GPKG, Shapefile, GeoTIFF, GeoParquet, PMTiles), converting between them, or reading remote geospatial data."
+description: "Read and convert remote geospatial files with GDAL/OGR. Covers the VSI virtual filesystem layer (/vsicurl/, /vsis3/) that enables remote access without downloading, when to use each prefix, ogrinfo and ogr2ogr patterns, geometry edge cases, and when to use DuckDB instead. Use when inspecting or converting GDB, GPKG, Shapefile, GeoTIFF, GeoParquet, or other formats locally or from remote URLs."
 license: Apache-2.0
 metadata:
   author: boettiger-lab

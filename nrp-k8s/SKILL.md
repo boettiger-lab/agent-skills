@@ -1,6 +1,6 @@
 ---
-name: nrp-k8s-batch
-description: "Run batch processing jobs on the NRP (National Research Platform) Nautilus Kubernetes cluster. Covers the mandatory requirements for CPU jobs: opportunistic priority class, resource requests/limits, and GPU node avoidance. Use when creating or managing Kubernetes jobs on the NRP Nautilus cluster, or when the user mentions NRP, Nautilus, or needs to run batch workloads on a shared academic cluster."
+name: nrp-k8s
+description: "Deploy and manage workloads on the NRP Nautilus Kubernetes cluster. Covers batch jobs (opportunistic priority class, resource requests, GPU node avoidance), ingress with HAProxy CORS and timeout annotations, NRP usage policies, and credential wiring. Use when creating jobs, deployments, services, or ingress resources on NRP Nautilus."
 license: Apache-2.0
 compatibility: "Requires kubectl configured for the NRP Nautilus cluster (namespace: biodiversity)."
 metadata:
