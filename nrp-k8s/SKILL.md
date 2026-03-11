@@ -1,6 +1,6 @@
 ---
 name: nrp-k8s
-description: "Deploy and manage workloads on the NRP Nautilus Kubernetes cluster. Covers batch jobs (opportunistic priority class, resource requests, GPU node avoidance), ingress with HAProxy CORS and timeout annotations, NRP usage policies, and credential wiring. Use when creating jobs, deployments, services, or ingress resources on NRP Nautilus."
+description: "Deploy and manage workloads on the NRP Nautilus Kubernetes cluster. Covers batch jobs (opportunistic priority class, resource requests, GPU node avoidance), ingress with HAProxy CORS and timeout annotations, NRP usage policies, and credential wiring. TRIGGER when the user mentions: kubectl, k8s, kubernetes, NRP, Nautilus, rollout, restart deployment, apply yaml, pod, job, namespace, ingress, or any cluster operation. Namespace is 'biodiversity'. Always load this skill BEFORE running any kubectl command."
 license: Apache-2.0
 compatibility: "Requires kubectl configured for the NRP Nautilus cluster (namespace: biodiversity)."
 metadata:
