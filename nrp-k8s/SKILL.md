@@ -185,6 +185,47 @@ spec:
 
 The `mcp-session-id` header in `cors-allow-headers` is needed if the service hosts an MCP server. The extended `timeout-tunnel` is required for SSE or WebSocket connections that would otherwise be dropped after the default HAProxy idle timeout.
 
+## Targeting Dedicated or Tainted Nodes
+
+Some nodes in the NRP cluster carry custom taints that prevent general scheduling. This is common for institution-owned nodes reserved for specific projects or flagged with maintenance issues.
+
+### Discovering taints
+
+You cannot read node specs directly (forbidden at cluster scope for namespace users). Instead:
+
+1. **Submit a test pod with `nodeSelector`** targeting the hostname, tolerate only the taints you know about, then inspect the pending pod's condition message:
+
+```bash
+kubectl -n biodiversity get pods <pod-name> -o jsonpath='{.items[0].status.conditions}' | python3 -m json.tool
+```
+
+The scheduler error will list every untolerated taint verbatim, e.g.:
+`1 node(s) had untolerated taint {nautilus.io/issue: 1234}`
+
+2. **Search NRP GitLab issues** for the node hostname or taint value to understand what the taint means:
+`https://gitlab.nrp-nautilus.io/search?search=<hostname>&scope=issues&group_id=4`
+
+Taint keys used in NRP include:
+- `nautilus.io/issue: <ticket-number>` — node flagged with an open maintenance/problem ticket
+- `nautilus.io/reservation: <group>` — node reserved for a specific group
+- `nautilus.io/hardware: <type>` — hardware-specific scheduling (e.g. `arm64`, `large-gpu`)
+
+### Toleration syntax
+
+Once you know the taint key and value, add a toleration:
+
+```yaml
+tolerations:
+  - key: "nautilus.io/issue"      # exact key from the scheduler error message
+    value: "1234"                  # exact value from the scheduler error message
+    operator: Equal
+    effect: NoSchedule
+nodeSelector:
+  kubernetes.io/hostname: mynode.example.edu
+```
+
+> **Note:** Using `operator: Exists` with no key (tolerate all taints) may be rejected by the NRP admission webhook. Always use explicit `key`/`value` pairs from the scheduler message.
+
 ## Common Pitfalls
 
 1. **Missing resource requests/limits** — Jobs will not schedule without them.

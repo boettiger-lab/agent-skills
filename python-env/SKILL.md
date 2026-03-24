@@ -13,6 +13,11 @@
    - `ghcr.io/boettiger-lab/datasets:latest` — DuckDB, GDAL, geopandas, h3, rasterio, pyarrow, and other geospatial/data tooling
    - `ghcr.io/rocker-org/ml:latest` — R + Python ML stack (torch, scikit-learn, etc.)
 
+   Always pull the latest image before running:
+   ```bash
+   docker pull ghcr.io/boettiger-lab/datasets:latest
+   ```
+
    Example:
    ```bash
    docker run --rm -v "$(pwd):/work" -w /work ghcr.io/boettiger-lab/datasets:latest python3 script.py

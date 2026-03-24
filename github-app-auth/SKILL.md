@@ -14,14 +14,30 @@ Agents in the `boettiger-lab` org authenticate as the `boettiger-lab-llm-agent` 
 After the human has run `gh-agent-unlock`, **use `git` and `gh` exactly as you normally would** —
 credential injection and token refresh are fully automatic.
 
-## Session start (human runs once)
+## Session commands (human runs)
 
 ```bash
-gh-agent-unlock   # YubiKey PIN + touch; decrypts key to /dev/shm
+gh-agent-unlock   # YubiKey PIN + touch; decrypts key to /dev/shm → all git/gh uses App identity
+gh-agent-lock     # wipe key from /dev/shm → all git/gh reverts to personal gh credentials
 ```
 
-After this, `git push`, `git pull`, `gh pr create`, `gh issue comment`, etc. all just work.
+**Scope:** The App only has access to `boettiger-lab` org. When unlocked, pushes to any other org
+(e.g. `espm-288`, `UCB-R-Users`) will fail. Run `gh-agent-lock` to revert to personal auth.
+
+After `gh-agent-unlock`, `git push`, `git pull`, `gh pr create`, `gh issue comment`, etc. all just work.
 No token exports, no per-repo setup, no credential flags needed.
+
+## What the App cannot do — ask the human instead
+
+The App token does **not** have admin/org-level permissions. Operations that require them will fail with a GraphQL or 403 error. When this happens, ask the human to do it directly — do **not** ask them to run `gh-agent-unlock`, as that won't help.
+
+| Operation | Why it fails | What to ask |
+|---|---|---|
+| `gh repo create` | Requires org admin or user OAuth scope | "Please create the repo `boettiger-lab/<name>` on GitHub, then I'll push." |
+| Changing repo visibility | Requires admin permission | Ask human to change via GitHub UI |
+| Managing org members/teams | Org admin only | Ask human directly |
+
+In general: repo creation, deletion, and org settings always require the human.
 
 ## App identity
 
@@ -35,7 +51,13 @@ Actions appear as `boettiger-lab-llm-agent[bot]` in the GitHub audit log.
 
 ## Troubleshooting
 
-**Auth fails** — ask the human to run `gh-agent-unlock` (requires physical YubiKey).
+**Can't push to a non-boettiger-lab org (e.g. espm-288)** — the App key is unlocked and intercepting
+auth. Run `gh-agent-lock` to revert to personal credentials. Check with:
+```bash
+ls /dev/shm/github-app-private-key.pem   # exists → locked; missing → personal auth active
+```
+
+**Auth fails for boettiger-lab** — ask the human to run `gh-agent-unlock` (requires physical YubiKey).
 
 **Stale token in remote URL** — if a remote URL contains `x-access-token:ghs_...`, fix it:
 ```bash
