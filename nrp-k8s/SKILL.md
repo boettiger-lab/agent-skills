@@ -2,88 +2,15 @@
 name: nrp-k8s
 description: "Deploy and manage workloads on the NRP Nautilus Kubernetes cluster. Covers batch jobs (opportunistic priority class, resource requests, GPU node avoidance), ingress with HAProxy CORS and timeout annotations, NRP usage policies, and credential wiring. TRIGGER when the user mentions: kubectl, k8s, kubernetes, NRP, Nautilus, rollout, restart deployment, apply yaml, pod, job, namespace, ingress, or any cluster operation. Namespace is 'biodiversity'. Always load this skill BEFORE running any kubectl command."
 license: Apache-2.0
-compatibility: "Requires kubectl configured for the NRP Nautilus cluster (namespace: biodiversity)."
-metadata:
-  author: boettiger-lab
-  version: "1.0"
 ---
 
-# NRP Kubernetes Batch Jobs
+# NRP Kubernetes
 
-The NRP (National Research Platform) Nautilus cluster is a shared academic Kubernetes cluster. Read the [NRP usage policies](https://nrp.ai/documentation/userdocs/start/policies/) before running jobs. Key rules:
+Shared academic cluster. Namespace: `biodiversity`. [Usage policies](https://nrp.ai/documentation/userdocs/start/policies/) — key rules: no `sleep` in jobs, resource requests must reflect actual usage (~20% tolerance), no interactive pods >6h.
 
-- **No `sleep` commands** in batch jobs — this is grounds for a ban
-- **Resource requests must reflect actual usage** — limits must be within ~20% of requests; pods that chronically over- or under-use their allocation violate policy
-- **Long-running Deployments** are auto-deleted after 2 weeks unless whitelisted; use Job controllers for batch work
-- **Interactive pods** are limited to 6 hours, 2 GPUs, 32GB RAM, 16 cores
+## Batch Job Requirements
 
-## Namespace
-
-All our jobs run in the `biodiversity` namespace:
-
-```bash
-kubectl -n biodiversity get jobs
-```
-
-## Mandatory Requirements for CPU Jobs
-
-### 1. Priority class (REQUIRED)
-
-All CPU jobs **must** use the `opportunistic` priority class. This makes pods preemptible so they don't block GPU users. Without this, your job may be rejected or cause problems for other users.
-
-```yaml
-spec:
-  template:
-    spec:
-      priorityClassName: opportunistic
-```
-
-### 2. Resource requests and limits (REQUIRED)
-
-The NRP cluster **requires** both `requests` and `limits` on every container. Jobs without resource specifications will not be scheduled. Set requests equal to limits, and **request only what you will actually use** — the policies require utilization to stay within ~20% of your request:
-
-```yaml
-resources:
-  requests:
-    cpu: "4"
-    memory: "8Gi"
-  limits:
-    cpu: "4"
-    memory: "8Gi"
-```
-
-If you need ephemeral scratch disk, request it explicitly:
-
-```yaml
-resources:
-  requests:
-    cpu: "4"
-    memory: "32Gi"
-    ephemeral-storage: "250Gi"
-  limits:
-    cpu: "4"
-    memory: "32Gi"
-```
-
-### 3. GPU node avoidance (recommended)
-
-To avoid wasting GPU node capacity on CPU-only work, add a node anti-affinity:
-
-```yaml
-spec:
-  template:
-    spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: feature.node.kubernetes.io/pci-10de.present
-                    operator: NotIn
-                    values: ["true"]
-```
-
-## Minimal Job Example
+All CPU jobs need `priorityClassName: opportunistic`, explicit resource requests=limits, and `restartPolicy: Never`. GPU node avoidance is recommended:
 
 ```yaml
 apiVersion: batch/v1
@@ -97,6 +24,14 @@ spec:
     spec:
       priorityClassName: opportunistic
       restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: feature.node.kubernetes.io/pci-10de.present
+                    operator: NotIn
+                    values: ["true"]
       containers:
         - name: worker
           image: ghcr.io/boettiger-lab/datasets:latest
@@ -110,28 +45,20 @@ spec:
               memory: "8Gi"
 ```
 
+Add `ephemeral-storage: "250Gi"` to requests/limits if scratch disk is needed.
+
 ## Secrets
 
-Two secrets are available in the `biodiversity` namespace. See the [nrp-s3 skill](../nrp-s3/SKILL.md) for full details on S3 environment variables.
-
-### `aws` — S3 credentials (environment variables)
-
+**S3 credentials** (`aws` secret):
 ```yaml
 env:
   - name: AWS_ACCESS_KEY_ID
-    valueFrom:
-      secretKeyRef:
-        name: aws
-        key: AWS_ACCESS_KEY_ID
+    valueFrom: {secretKeyRef: {name: aws, key: AWS_ACCESS_KEY_ID}}
   - name: AWS_SECRET_ACCESS_KEY
-    valueFrom:
-      secretKeyRef:
-        name: aws
-        key: AWS_SECRET_ACCESS_KEY
+    valueFrom: {secretKeyRef: {name: aws, key: AWS_SECRET_ACCESS_KEY}}
 ```
 
-### `rclone-config` — Rclone configuration (volume mount)
-
+**Rclone config** (`rclone-config` secret):
 ```yaml
 volumeMounts:
   - name: rclone-config
@@ -145,9 +72,7 @@ volumes:
 
 ## Ingress
 
-NRP uses **HAProxy** as its ingress controller (not nginx). CORS and timeouts are configured via HAProxy annotations on the Ingress resource, not in the application or Service.
-
-Hostnames follow the pattern `<service>.nrp-nautilus.io`. TLS is terminated by the cluster — just list the hostname under `tls.hosts`, no certificate secret needed.
+NRP uses **HAProxy** (not nginx). TLS is cluster-terminated — just list the hostname, no cert secret needed.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -155,16 +80,14 @@ kind: Ingress
 metadata:
   name: my-ingress
   annotations:
-    # CORS — required for browser clients (maps, MCP tools, etc.)
     haproxy-ingress.github.io/cors-enable: "true"
     haproxy-ingress.github.io/cors-allow-origin: "*"
     haproxy-ingress.github.io/cors-allow-methods: "GET, POST, OPTIONS"
     haproxy-ingress.github.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,mcp-session-id"
     haproxy-ingress.github.io/cors-allow-credentials: "true"
     haproxy-ingress.github.io/cors-max-age: "86400"
-    # Extended timeouts for long-lived connections (MCP, WebSockets)
     haproxy-ingress.github.io/timeout-server: "600s"
-    haproxy-ingress.github.io/timeout-tunnel: "3600s"
+    haproxy-ingress.github.io/timeout-tunnel: "3600s"  # required for SSE/WebSocket
 spec:
   ingressClassName: haproxy
   tls:
@@ -183,96 +106,43 @@ spec:
                   number: 80
 ```
 
-The `mcp-session-id` header in `cors-allow-headers` is needed if the service hosts an MCP server. The extended `timeout-tunnel` is required for SSE or WebSocket connections that would otherwise be dropped after the default HAProxy idle timeout.
+Add `mcp-session-id` to `cors-allow-headers` for MCP servers.
 
-## Our Dedicated Node
+## Dedicated Node
 
-`stratus1.nrp-espm.berkeley.edu` is our Berkeley-owned node. It is always available for our jobs but currently carries a `nautilus.io/issue` taint (numbered ticket). Target it when jobs are getting preempted frequently on shared nodes. Use `nodeSelector` + `operator: Exists` toleration for the issue key:
-
-```yaml
-spec:
-  template:
-    spec:
-      nodeSelector:
-        kubernetes.io/hostname: stratus1.nrp-espm.berkeley.edu
-      tolerations:
-      - key: "nautilus.io/issue"
-        operator: Exists
-        effect: NoSchedule
-```
-
-## Targeting Dedicated or Tainted Nodes
-
-Some nodes in the NRP cluster carry custom taints that prevent general scheduling. This is common for institution-owned nodes reserved for specific projects or flagged with maintenance issues.
-
-### Discovering taints
-
-You cannot read node specs directly (forbidden at cluster scope for namespace users). Instead:
-
-1. **Submit a test pod with `nodeSelector`** targeting the hostname, tolerate only the taints you know about, then inspect the pending pod's condition message:
-
-```bash
-kubectl -n biodiversity get pods <pod-name> -o jsonpath='{.items[0].status.conditions}' | python3 -m json.tool
-```
-
-The scheduler error will list every untolerated taint verbatim, e.g.:
-`1 node(s) had untolerated taint {nautilus.io/issue: 1234}`
-
-2. **Search NRP GitLab issues** for the node hostname or taint value to understand what the taint means:
-`https://gitlab.nrp-nautilus.io/search?search=<hostname>&scope=issues&group_id=4`
-
-Taint keys used in NRP include:
-- `nautilus.io/issue: <ticket-number>` — node flagged with an open maintenance/problem ticket
-- `nautilus.io/reservation: <group>` — node reserved for a specific group
-- `nautilus.io/hardware: <type>` — hardware-specific scheduling (e.g. `arm64`, `large-gpu`)
-
-### Toleration syntax
-
-Once you know the taint key and value, add a toleration:
+`stratus1.nrp-espm.berkeley.edu` is our Berkeley-owned node — use when jobs get preempted on shared nodes. It carries a `nautilus.io/issue` taint; tolerate it with `operator: Exists`:
 
 ```yaml
-tolerations:
-  - key: "nautilus.io/issue"      # exact key from the scheduler error message
-    value: "1234"                  # exact value from the scheduler error message
-    operator: Equal
-    effect: NoSchedule
 nodeSelector:
-  kubernetes.io/hostname: mynode.example.edu
+  kubernetes.io/hostname: stratus1.nrp-espm.berkeley.edu
+tolerations:
+  - key: "nautilus.io/issue"
+    operator: Exists
+    effect: NoSchedule
 ```
 
-> **Note:** Using `operator: Exists` with no key (tolerate all taints) may be rejected by the NRP admission webhook. Always use explicit `key`/`value` pairs from the scheduler message.
+To discover taints on other nodes, check the scheduler error from a pending pod: `kubectl -n biodiversity describe pod <pod>` — the message lists every untolerated taint verbatim. Use exact `key`/`value` pairs (not `operator: Exists` globally — the admission webhook may reject it).
 
 ## Deployment Rollouts
 
-When deploying config changes (e.g. updated ConfigMaps), always `kubectl apply` the ConfigMap **before** restarting the deployment — `rollout restart` only recycles pods using whatever ConfigMap is already in the cluster:
+Always `kubectl apply` ConfigMaps **before** restarting — `rollout restart` recycles pods using whatever is already in the cluster; git push alone does nothing:
 
 ```bash
-kubectl apply -f k8s/content-configmap.yaml
+kubectl apply -f k8s/my-configmap.yaml
 kubectl -n biodiversity rollout restart deployment/<name>
 ```
 
-### Stuck rollouts: bad nodes
-
-If `rollout status` hangs for more than ~2 minutes, the new pod has likely landed on a problematic node (broken containerd, Docker Hub pull failure, etc.). Check:
+**Stuck rollout?** If `rollout status` hangs >2 min, the pod likely landed on a broken node. Check with `kubectl -n biodiversity get pods -o wide` and `describe pod`. If it's a node issue (not your image), delete the stuck pod — it reschedules, and the old pod stays live throughout (`maxUnavailable: 0`):
 
 ```bash
-kubectl -n biodiversity get pods -l app=<name> -o wide
-kubectl -n biodiversity describe pod <new-pod> | grep -A5 "Warning\|Failed"
-```
-
-If the node is the issue (not your image), simply delete the stuck pod — Kubernetes will reschedule it. The old pod stays running throughout (assuming `maxUnavailable: 0`):
-
-```bash
-kubectl -n biodiversity delete pod <stuck-pod-name>
+kubectl -n biodiversity delete pod <stuck-pod>
 ```
 
 ## Common Pitfalls
 
-1. **Missing resource requests/limits** — Jobs will not schedule without them.
-2. **Forgetting `priorityClassName: opportunistic`** — Required for all CPU jobs.
-3. **Using `sleep` in batch jobs** — Violates policy and can result in a ban.
-4. **Over-requesting resources** — Chronic under-utilization violates policy. Request what you'll actually use.
-5. **Max 200 completions per indexed job** — Hard limit to avoid overwhelming the cluster's etcd.
-6. **Using nginx ingress annotations** — NRP uses HAProxy; nginx annotations are silently ignored.
-7. **`rollout restart` without `kubectl apply`** — Config changes in YAML files must be applied to the cluster before restarting; git push alone does not update the cluster.
-7. **Expecting TLS certificates to auto-provision** — Just list the hostname under `tls.hosts`; the cluster handles termination.
+1. **No `priorityClassName: opportunistic`** — required for all CPU jobs
+2. **Missing resource requests/limits** — pod won't schedule
+3. **`sleep` in batch jobs** — policy violation, grounds for ban
+4. **`rollout restart` without `kubectl apply`** — config changes won't take effect
+5. **nginx ingress annotations** — NRP uses HAProxy; nginx annotations are silently ignored
+6. **Max 200 completions per indexed job** — hard cluster limit
