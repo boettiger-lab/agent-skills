@@ -185,6 +185,22 @@ spec:
 
 The `mcp-session-id` header in `cors-allow-headers` is needed if the service hosts an MCP server. The extended `timeout-tunnel` is required for SSE or WebSocket connections that would otherwise be dropped after the default HAProxy idle timeout.
 
+## Our Dedicated Node
+
+`stratus1.nrp-espm.berkeley.edu` is our Berkeley-owned node. It is always available for our jobs but currently carries a `nautilus.io/issue` taint (numbered ticket). Target it when jobs are getting preempted frequently on shared nodes. Use `nodeSelector` + `operator: Exists` toleration for the issue key:
+
+```yaml
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: stratus1.nrp-espm.berkeley.edu
+      tolerations:
+      - key: "nautilus.io/issue"
+        operator: Exists
+        effect: NoSchedule
+```
+
 ## Targeting Dedicated or Tainted Nodes
 
 Some nodes in the NRP cluster carry custom taints that prevent general scheduling. This is common for institution-owned nodes reserved for specific projects or flagged with maintenance issues.
@@ -226,6 +242,30 @@ nodeSelector:
 
 > **Note:** Using `operator: Exists` with no key (tolerate all taints) may be rejected by the NRP admission webhook. Always use explicit `key`/`value` pairs from the scheduler message.
 
+## Deployment Rollouts
+
+When deploying config changes (e.g. updated ConfigMaps), always `kubectl apply` the ConfigMap **before** restarting the deployment — `rollout restart` only recycles pods using whatever ConfigMap is already in the cluster:
+
+```bash
+kubectl apply -f k8s/content-configmap.yaml
+kubectl -n biodiversity rollout restart deployment/<name>
+```
+
+### Stuck rollouts: bad nodes
+
+If `rollout status` hangs for more than ~2 minutes, the new pod has likely landed on a problematic node (broken containerd, Docker Hub pull failure, etc.). Check:
+
+```bash
+kubectl -n biodiversity get pods -l app=<name> -o wide
+kubectl -n biodiversity describe pod <new-pod> | grep -A5 "Warning\|Failed"
+```
+
+If the node is the issue (not your image), simply delete the stuck pod — Kubernetes will reschedule it. The old pod stays running throughout (assuming `maxUnavailable: 0`):
+
+```bash
+kubectl -n biodiversity delete pod <stuck-pod-name>
+```
+
 ## Common Pitfalls
 
 1. **Missing resource requests/limits** — Jobs will not schedule without them.
@@ -234,4 +274,5 @@ nodeSelector:
 4. **Over-requesting resources** — Chronic under-utilization violates policy. Request what you'll actually use.
 5. **Max 200 completions per indexed job** — Hard limit to avoid overwhelming the cluster's etcd.
 6. **Using nginx ingress annotations** — NRP uses HAProxy; nginx annotations are silently ignored.
+7. **`rollout restart` without `kubectl apply`** — Config changes in YAML files must be applied to the cluster before restarting; git push alone does not update the cluster.
 7. **Expecting TLS certificates to auto-provision** — Just list the hostname under `tls.hosts`; the cluster handles termination.
