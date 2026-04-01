@@ -205,6 +205,8 @@ Open one issue in the focal app repo linking all cross-repo issues and listing a
 
 ## Step 6: Deploy and Validate
 
+Most deploy like this but check the app's AGENTS.md file, some apps with private data have configmap-based deployment instead of pulls from github.
+
 ```bash
 # For k8s-deployed apps (only needed if system-prompt.md changed)
 kubectl -n biodiversity rollout restart deployment/APP_NAME
@@ -230,9 +232,5 @@ Then test by asking the same questions that triggered issues. Check MCP logs for
 
 ## Reference: App Inventory
 
-| App | Repo | Hostname | Deployment |
-|---|---|---|---|
-| TPL National | boettiger-lab/tpl | tpl.nrp-nautilus.io | `deployment/tpl` |
-| TPL California | boettiger-lab/tpl-ca | tpl-ca.nrp-nautilus.io | `deployment/tpl-ca` |
-| Wetlands | boettiger-lab/wetlands | wetlands.nrp-nautilus.io | `deployment/wetlands-maplibre` |
-| Wyoming | boettiger-lab/wyoming | wyoming.nrp-nautilus.io | `deployment/wyoming` |
+Claude should be running from the repo of the app in question when debugging any specific app.  
+
