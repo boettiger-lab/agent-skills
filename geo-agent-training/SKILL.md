@@ -162,16 +162,38 @@ For every inefficiency found, ask these questions in order:
 
 ## Step 4: Verify Fixes Against Live Data
 
-**Always test proposed SQL patterns against the actual MCP tool** before recommending them:
+**Always test proposed SQL patterns against the actual MCP tool** before recommending them. The public MCP endpoint handles both public and private data — private apps just require credentials passed per-call.
+
+### Public apps
 
 ```
 mcp__duckdb-geo__query(sql_query="YOUR SQL HERE")
-```
-
-For STAC metadata issues, verify the current state:
-```
 mcp__duckdb-geo__get_dataset(dataset_id="COLLECTION_ID")
 ```
+
+### Apps with private data
+
+The same public MCP endpoint is used, but credentials must be passed per-call:
+
+```
+mcp__duckdb-geo__query(
+  sql_query="SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet('s3://my-private-bucket/...') LIMIT 0)",
+  s3_key="...",
+  s3_secret="...",
+  s3_endpoint="my-s3-endpoint.example.org"
+)
+```
+
+For a private STAC catalog:
+```
+mcp__duckdb-geo__get_dataset(
+  dataset_id="my-dataset",
+  catalog_url="https://my-app.example.org/stac/catalog.json",
+  catalog_token="..."
+)
+```
+
+**If you do not have the credentials in your session**, ask the user to provide them before proceeding. Do not attempt to verify data by going to raw source files — MCP is always the right path.
 
 ## Step 5: File Issues and Apply Fixes
 
