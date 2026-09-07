@@ -1,61 +1,80 @@
 # agent-skills
 
-Providing appropriate context and knowledge our agents need to succeed.
+Context and knowledge our agents need to succeed.
 
 [Agent skills](https://agentskills.io/home)
 
-## What is here
+## Install the rules globally; keep the knowledge with its repo
 
-| Skill | For |
-|-------|-----|
-| `boettiger-lab-stack` | Map of the boettiger-lab data-and-agent stack — which GitHub repo owns which piece of the data → STAC → MCP → LLM-agent chain |
-| `cng-datasets` | Process geospatial datasets into cloud-native formats (GeoParquet, PMTiles, H3 hex Parquet) using the cng-datasets CLI and NRP Kubernetes |
-| `duckdb-spatial` | Critical gotchas for DuckDB spatial extension: the ST_Read() vs read_parquet() distinction, vendored GDAL limitations, S3 secret configuration for… |
-| `gdal-spatial` | Read and convert remote geospatial files with GDAL/OGR |
-| `github-app-auth` | Authenticate to GitHub using the boettiger-lab-llm-agent GitHub App |
-| `github-rulesets` | Apply preferred branch-protection rulesets and squash-merge-only settings to GitHub repos |
-| `k8s-never-force-delete` | Kubernetes deletion safety — never force-delete |
-| `no-ai-attribution` | Authorship and attribution policy — Claude is a tool, never an author or co-author |
-| `nrp-k8s` | Deploy and manage workloads on the NRP Nautilus Kubernetes cluster |
-| `nrp-s3` | Manage S3 object storage on the NRP (National Research Platform) Nautilus cluster, which uses Ceph S3 (not AWS) |
-| `oci-artifacts` | Use when storing, versioning, or sharing large files alongside a GitHub repo — model checkpoints, datasets, build artifacts, binaries, fixtures —… |
-| `python-env` | Never install into or run the system Python |
-| `stac-navigation` | Use when browsing, querying, or reasoning about what datasets exist in a STAC catalog — especially before concluding a dataset is missing or absent |
+A skill's `description` is loaded into **every session in every repo** so the
+model can decide whether to trigger it. That is a standing cost, and a standing
+chance of firing when it is not wanted. So the default is not "clone
+everything" — it is:
 
-## Working with Claude Code (via CLI or VSCode)
+**Globally, in `~/.claude/skills/` — rule-shaped skills only.** Things that must
+hold everywhere, that no single repo would own, and that go stale slowly:
 
-Clone to `~/.claude/skills`:
+| Skill | Why global |
+|-------|------------|
+| `no-ai-attribution` | Authorship policy. Applies to every commit in every repo. |
+| `k8s-never-force-delete` | Destructive-action guard. Wanted wherever a cluster is reachable. |
+| `python-env` | "Never install into system Python." True everywhere; 30 lines. |
 
-```bash
-git clone https://github.com/boettiger-lab/agent-skills ~/.claude/skills
-```
-
-`git clone` refuses a directory that already exists and is non-empty, so if you
-already have skills there, move them aside first (and open a PR here for any
-worth keeping) rather than deleting them:
+**Per repo, in `<repo>/.claude/skills/` — everything else.** Domain knowledge
+belongs beside the code it describes, where it is version-matched, reviewed in
+the same PR as the change it documents, and only loaded when someone is working
+in that repo:
 
 ```bash
-mv ~/.claude/skills ~/.claude/skills.bak
-git clone https://github.com/boettiger-lab/agent-skills ~/.claude/skills
+mkdir -p .claude/skills
+cp -r /path/to/agent-skills/cng-datasets .claude/skills/
+git add .claude/skills && git commit -m "Add cng-datasets skill to the repo"
 ```
 
-Other clients can be instructed to load these skills on demand by having the
-model copy their metadata into AGENTS.md or similar.
+The path matters: **`.claude/skills/<name>/SKILL.md`**. A bare `skills/` at the
+repo root is not a discovery location — skills there are never indexed and
+never load, however good they are.
+
+This repo stays the library those copies come from, and the place to send a fix
+that is not repo-specific.
+
+### Why not just clone it all
+
+We ran a full week of work on `boettiger-lab/datasets` — CLI changes, k8s
+workflow generators, Armada, GDAL, DuckDB, H3 — with none of the domain skills
+installed, and did not miss them: `AGENTS.md`, `docs/` and the issue threads
+carried it, and carried it *current*, while the `cng-datasets` skill here had
+drifted five months behind the CLI. Knowledge duplicated away from the code
+goes stale in exactly the way the code does not.
+
+### Setup
+
+```bash
+mkdir -p ~/.claude/skills
+git clone https://github.com/boettiger-lab/agent-skills /tmp/agent-skills
+for s in no-ai-attribution k8s-never-force-delete python-env; do
+  cp -r /tmp/agent-skills/$s ~/.claude/skills/
+done
+```
+
+Clone the whole thing into `~/.claude/skills` only if you genuinely want every
+skill live in every session. Note `git clone` refuses a non-empty target, so on
+a machine that already has skills, move them aside first rather than deleting
+them — and open a PR here for any worth keeping.
 
 ### These skills are not the whole configuration
 
-A skill loads **on demand**, when its description matches what is happening.
-That is right for knowledge ("how does rclone work against Ceph") and wrong for
-standing rules, which have to be in force before anything triggers them. Two
-other files carry those, and neither lives here:
+A skill loads **on demand**, when its description matches. That is right for
+knowledge and wrong for standing rules, which must be in force before anything
+triggers them. Two files carry those, and neither lives here:
 
 - `~/.claude/CLAUDE.md` — injected into every session unconditionally.
 - `~/.claude/settings.json` — mechanical enforcement (`includeCoAuthoredBy`),
   plus the environment description and soft-deny list.
 
-The attribution policy is deliberately carried in all three places: always-on
-prose, a triggered skill, and a setting. Cloning this repo alone does not move
-it. Do not copy `~/.claude/.credentials.json` between machines — re-authenticate.
+The attribution policy is deliberately carried in all three: always-on prose, a
+triggered skill, and a setting. Cloning this repo alone does not move it. Do
+not copy `~/.claude/.credentials.json` between machines — re-authenticate.
 
 ### When working with devcontainers
 
@@ -71,9 +90,40 @@ symlink the skills dir, e.g.
 }
 ```
 
+## The library
+
+Rule-shaped, install globally:
+
+| Skill | For |
+|-------|-----|
+| `no-ai-attribution` | Claude is a tool, never an author or co-author |
+| `k8s-never-force-delete` | Never force-delete; diagnose stuck resources instead |
+| `python-env` | Never install into or run the system Python |
+
+Cross-repo, install globally only if you route between repos often:
+
+| Skill | For |
+|-------|-----|
+| `boettiger-lab-stack` | Which repo owns which piece of the data → STAC → MCP → agent chain |
+
+Domain knowledge — copy into the repo it serves:
+
+| Skill | Belongs with |
+|-------|--------------|
+| `cng-datasets` | `datasets` / `data-workflows` |
+| `duckdb-spatial` | any repo querying spatial parquet |
+| `gdal-spatial` | `datasets`, `data-workflows` |
+| `nrp-k8s` | any repo deploying to Nautilus |
+| `nrp-s3` | any repo writing to Ceph S3 |
+| `stac-navigation` | `data-workflows`, `mcp-data-server` |
+| `oci-artifacts` | whichever repo ships large artifacts |
+| `github-app-auth` | wherever the bot account pushes |
+| `github-rulesets` | wherever branch protection is applied |
+
 ## Adding a skill
 
 Every skill is a directory with a `SKILL.md` whose YAML frontmatter carries at
 least `name` and `description`. **Without frontmatter a skill cannot be indexed
-and will never load** — write the description as the conditions that should
-trigger it, not as a summary of the contents.
+and will never load** — two skills here had shipped that way. Write the
+description as the conditions that should trigger it, not as a summary of the
+contents.
