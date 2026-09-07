@@ -2,7 +2,7 @@
 name: cng-datasets
 description: "Process geospatial datasets into cloud-native formats (GeoParquet, PMTiles, H3 hex Parquet) using the cng-datasets CLI and NRP Kubernetes. Covers the full workflow: URL verification, raw S3 upload, YAML generation, cluster deployment, monitoring, and documentation. Use when processing any geospatial dataset in the data-workflows repo, or when working with the cng-datasets CLI."
 license: Apache-2.0
-compatibility: "Requires uv/pip for local CLI install, kubectl for NRP Nautilus cluster (namespace: biodiversity). See nrp-k8s and nrp-s3 skills for cluster/S3 details."
+compatibility: "Requires uv/pip for local CLI install, kubectl for NRP Nautilus cluster. `--namespace` still defaults to `biodiversity`, but current dataset workflows run in `geo-workflows` — pass it explicitly. See nrp-k8s and nrp-s3 skills for cluster/S3 details."
 metadata:
   author: boettiger-lab
   version: "1.0"
@@ -65,6 +65,7 @@ cng-datasets workflow \
   --dataset <name> \
   --source-url <url> \
   --bucket <bucket> \
+  --namespace geo-workflows \
   --h3-resolution 10 \
   --parent-resolutions "9,8,0" \
   --hex-memory 32Gi \
@@ -73,12 +74,60 @@ cng-datasets workflow \
   --output-dir catalog/<dataset>/k8s/<name>
 ```
 
+Useful additions, none of them on by default:
+
+| Flag | Use |
+|------|-----|
+| `--expect-features N` | Feature count you know independently. The convert step exits non-zero on a mismatch, so a silently truncated source fails the workflow instead of flowing into hex and PMTiles. |
+| `--trim-strings` | Strip leading/trailing whitespace from every VARCHAR column, for sources with stray spaces in categorical fields (WDPA `NO_TAKE = 'All '`). |
+| `--simplify-tolerance T` | Simplify geometries after reprojection; T is in target-CRS units (degrees for EPSG:4326). |
+| `--lat-column` / `--lon-column` | Required shape when the source is a CSV of points rather than a spatial format. |
+| `--resolution-by-area` | Stratify features into area tiers so huge features hex at coarser resolution. |
+| `--backend armada` | Submit through Armada instead of k8s Jobs; see the Armada note below. |
+
 Add `--layer <LayerName>` for multi-layer sources (GDB, GPKG). For multi-layer files, run one `workflow` command per layer:
 
 ```bash
 cng-datasets workflow --dataset padus-4-1/fee --layer PADUS4_1Fee ...
 cng-datasets workflow --dataset padus-4-1/easement --layer PADUS4_1Easement ...
 ```
+
+### Step 3b: Raster sources use `raster-workflow`
+
+A raster source (GeoTIFF/COG) does not go through `workflow` — that path is
+vector-only (convert → PMTiles → hex → repartition). Rasters use a separate
+generator producing setup-bucket → [preprocess-cog] → hex:
+
+```bash
+cng-datasets raster-workflow \
+  --dataset <name> \
+  --source-url <url> \
+  --bucket <bucket> \
+  --namespace geo-workflows \
+  --h3-resolution 10 \
+  --parent-resolutions "9,8,0" \
+  --value-column <name> \
+  --hex-resampling mean \
+  --h0-subset "12,14,20,50,71,78" \
+  --output-dir catalog/<dataset>/k8s/<name>
+```
+
+**`--hex-resampling` follows the source's units, not the concept.** `sum` only
+for values already integrated per pixel (population counts); `mean` for
+intensities and densities — summing a per-area density is the classic wrong
+answer. `mode` for categorical, `fractions` for per-class area accounting,
+`max`/`min` for extrema.
+
+**`--h0-subset` matters for any regional raster.** Without it the hex job fans
+out over all 122 h0 base cells. CONUS occupies 6 of them, so a CONUS raster
+would start 116 pods that each localize a multi-GB COG, find no overlap and
+exit. Pass the cells the source covers; the generated manifest carries the
+index mapping. It does not reduce per-pod memory — it removes pods that had
+nothing to do.
+
+**Repeat `--source-url` for multiple tiles**, which adds a preprocess-cog step
+that mosaics them (handling mixed CRS) into one WGS84 COG before hexing. A
+non-COG source triggers that step automatically.
 
 ### Step 4: Apply to the cluster
 
@@ -173,9 +222,26 @@ The hex step unnests millions of H3 cells in memory. A US state like Alaska (~1.
 | `--h3-resolution` | Lower (8, 6) for coarser data or very large areas. |
 | `--intermediate-chunk-size` | Decrease if hex pods OOM during unnest. |
 
+### Armada backend: non-preemptible by default, and retries do not survive
+
+`--backend armada` also emits `armada-*.yaml` alongside the k8s YAMLs. Two
+things to know before using it:
+
+- Converted jobs default to the **non-preemptible** `armada-default`. A
+  preempted Armada job is not rescheduled, unlike an opportunistic k8s pod
+  which its Job controller recreates. `--armada-priority-class preemptible`
+  opts back in, and is the right choice only once units are small enough that
+  losing one is cheap.
+- Conversion reads the podSpec, so k8s **Job-level retry settings do not
+  survive it** (`backoffLimit`, `backoffLimitPerIndex`, `maxFailedIndexes`).
+  Generation warns when a real retry budget is dropped.
+
+The converter reproduces the shape of the k8s job it reads — same cpu, memory
+and runtime — so today it is a transport change rather than a granularity win.
+
 ### Namespace pod quota: run hex workflows sequentially
 
-The `biodiversity` namespace has a **hard limit of 200 pods total**. A single hex workflow with `--max-parallelism 50` can consume 50 pods. Running multiple hex workflows simultaneously exhausts the quota.
+The namespace has a **hard limit of 200 pods total**. A single hex workflow with `--max-parallelism 50` can consume 50 pods. Running multiple hex workflows simultaneously exhausts the quota.
 
 **Rule: never submit more than one hex workflow at a time.**
 
@@ -207,3 +273,5 @@ See `AGENTS.md` in data-workflows for the full rechunking YAML pattern.
 5. **Sizing hex memory by feature count** — Size by spatial area. 50 states needs the same chunking as 85K tracts.
 6. **Processing data locally** — The CLI generates YAML. All processing runs on the cluster.
 7. **Not uploading raw data to S3 first** — If convert fails, you'll need to re-download from a slow/rate-limited provider.
+8. **Assuming a clean exit means complete data** — convert reports `Wrote N rows`; check it. A source truncated upstream converts cleanly and exits 0. Pass `--expect-features` when you know the count independently.
+9. **Building a raster below h8, or above it without h8 as a parent** — h8 is the catalog's universal join key. A build at h6 carries no h8 column and cannot be joined; a build at h10 only carries h8 if 8 is in `--parent-resolutions`. Generation warns in both cases.
