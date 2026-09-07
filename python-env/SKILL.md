@@ -1,3 +1,17 @@
+---
+name: python-env
+description: >-
+  Never install into or run the system Python. Consult BEFORE `pip install`, before
+  running a Python script or module, and before choosing an interpreter: prefer an
+  existing project venv, then a container image, then a project-local venv you create.
+  Triggers on: pip install, python3 script.py, python -m, venv, virtualenv, uv,
+  conda, "which python", ModuleNotFoundError, externally-managed-environment.
+license: Apache-2.0
+metadata:
+  author: boettiger-lab
+  version: "1.0"
+---
+
 # Python Environment
 
 **Never use system Python directly.** Do not `pip install` into the system environment.
