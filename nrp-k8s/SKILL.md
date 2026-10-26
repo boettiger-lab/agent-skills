@@ -6,11 +6,52 @@ license: Apache-2.0
 
 # NRP Kubernetes
 
-Shared academic cluster. Namespace: `biodiversity`. [Usage policies](https://nrp.ai/documentation/userdocs/start/policies/) — key rules: no `sleep` in jobs, resource requests must reflect actual usage (~20% tolerance), no interactive pods >6h.
+Shared academic cluster. Namespace: `biodiversity`. [Usage policies](https://nrp.ai/documentation/userdocs/start/policies/) — key rules: no `sleep` in jobs, pods must use what they request (see Usage policy below), no interactive pods >6h.
+
+## Usage policy
+
+Pods must use what they request. The NRP portal checks running pods every 10 minutes, and a pod is outside the policy when its use falls outside these ranges of its request:
+
+| Resource | Allowed use | Checked only when the pod requests |
+|---|---|---|
+| GPU | above 40% | any GPU |
+| CPU | 20%–200% | more than 1 core |
+| Memory | 20%–150% | more than 2 GiB |
+
+**Small pods are exempt.** A pod requesting at most 1 core is never checked on CPU, and one requesting at most 2 GiB is never checked on memory. Our web apps and MCP servers are designed around this exemption: they request 1 core or less and 2Gi or less, so they are never checked even though they sit idle most of the time. Do not raise them above either threshold. An idle server just over 2Gi would be checked and out of range.
+
+**Never checked:** opportunistic (negative-priority) pods, JupyterHub pods, and pods younger than 30 minutes.
+
+**The limit is 4 pods per user across all namespaces.** A user may have no more than 4 pods outside the ranges, counted over every namespace they use (`biodiversity`, `geo-workflows`, `schmidtdse`, …). Past that, the admission webhook `deployment.nrp-nautilus.io` denies every Deployment change on the account, including restarts of small exempt apps, with "Your pods resources utilization is too low for account …". Namespaces that keep requesting more than they use risk being banned. When a restart is denied this way, the cause is almost always a batch job in another namespace, not the app being restarted.
+
+**Limits must stay close to requests.** NRP separately enforces a limit/request ratio (`container-must-meet-memory-and-cpu-ratio`). A memory limit 1.5 times the request has been rejected, and 1.2 times passes.
+
+### Priority and sizing for batch jobs
+
+- **Pods that run under about an hour** use `priorityClassName: opportunistic`. They are exempt from the usage check, and a preempted pod costs little to redo. This covers setup jobs, daily CronJob runs and short fan-out units.
+- **Long work** is split into short units where that is practical, so it can run at opportunistic. Multi-hour pods at opportunistic are preempted repeatedly.
+- **Pods that must run long** use default priority, and their requests are sized to measured use: memory 20–150% of the request, CPU 20–200%, and the limit no more than about 1.2 times the request. Check them about 30 minutes after launch, before the portal does, and keep the job under the 4-pod limit.
+
+### Checking usage
+
+`check-usage.py` in this skill's directory lists every pod the portal would check and flags those outside the ranges:
+
+```bash
+python3 <this skill's directory>/check-usage.py                    # biodiversity geo-workflows schmidtdse
+python3 <this skill's directory>/check-usage.py geo-workflows      # one namespace
+```
+
+It reads pod specs with `kubectl` and use from NRP's Prometheus (`https://prometheus.nrp-nautilus.io`, no authentication needed), averaged over 30 minutes. It exits 1 when any checked pod is outside the policy. The portal's own measurement may differ in detail, so treat a result near a boundary as a warning. Run it:
+
+- about 30 minutes after launching a job that requests more than 1 core or 2 GiB at default priority;
+- before a rollout, if anything large is running;
+- whenever the webhook denies a Deployment change.
+
+Full policy: https://nrp.ai/documentation/userdocs/start/policies/ — per-user status: https://nrp.ai/userinfo/
 
 ## Batch Job Requirements
 
-All CPU jobs need `priorityClassName: opportunistic`, explicit resource requests=limits, and `restartPolicy: Never`. GPU node avoidance is recommended:
+CPU jobs whose pods run under about an hour use `priorityClassName: opportunistic` (see Usage policy for longer pods). All jobs need explicit resource requests and limits, with the limit at most about 1.2 times the request, and `restartPolicy: Never`. GPU node avoidance is recommended:
 
 ```yaml
 apiVersion: batch/v1
@@ -140,7 +181,7 @@ kubectl -n biodiversity delete pod <stuck-pod>
 
 ## Common Pitfalls
 
-1. **No `priorityClassName: opportunistic`** — required for all CPU jobs
+1. **Default priority with oversized requests** — a pod above 1 core or 2 GiB that uses less than 20% of its request counts against the 4-pod limit, and past that NRP blocks every Deployment change on the account. Use opportunistic for short pods, and size long ones to measured use
 2. **Missing resource requests/limits** — pod won't schedule
 3. **`sleep` in batch jobs** — policy violation, grounds for ban
 4. **`rollout restart` without `kubectl apply`** — config changes won't take effect
