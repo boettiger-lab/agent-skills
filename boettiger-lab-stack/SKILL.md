@@ -26,7 +26,7 @@ The stack is a pipeline. Data flows upward; requests flow downward. Each layer h
   raw + CNG data on S3 (Ceph via NRP)
 ```
 
-All of this runs on **NRP Nautilus** (Kubernetes, Ceph S3 under the `biodiversity` namespace). Platform concerns live in separate skills: `nrp-k8s`, `nrp-s3`.
+All of this runs on **NRP Nautilus** (Kubernetes, Ceph S3 under the `biodiversity` namespace). Platform concerns live in separate skills: `nrp-kubernetes`, `nrp-s3`.
 
 ## Per-repo ownership
 
@@ -46,7 +46,7 @@ The tool used *inside* data-workflows for new datasets: URL verification, raw S3
 
 - **"The agent gives the wrong column names for dataset X."** First check: does `get_stac_details(X)` return the right columns? If the STAC has wrong columns → `data-workflows`. If STAC is fine but the tool output is malformed → `mcp-data-server`. If the output is fine but the prompt doesn't consume it → `geo-agent`.
 - **"The agent didn't find dataset X."** Walk the STAC catalog yourself (use the `stac-navigation` skill). If X is missing from STAC → `data-workflows`. If X is present but `browse_stac_catalog` doesn't surface it → `mcp-data-server`. If it surfaces but the agent doesn't use it → `geo-agent` (probably a system-prompt / tool-description issue).
-- **"MCP startup is slow / pod won't come up."** Almost always NRP S3 tail latency. `mcp-data-server` fix if the code can bound the load time; `nrp-k8s` if it's a rollout / admission issue.
+- **"MCP startup is slow / pod won't come up."** Almost always NRP S3 tail latency. `mcp-data-server` fix if the code can bound the load time; `nrp-kubernetes` if it's a rollout / admission issue.
 - **"Catalog shape is weird for this agent use case."** Fix the catalog upstream in `data-workflows`, don't patch around it in `mcp-data-server`. Rendering logic should assume a well-formed catalog.
 
 ## The principle

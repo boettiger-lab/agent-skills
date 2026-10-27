@@ -2,7 +2,7 @@
 name: cng-datasets
 description: "Process geospatial datasets into cloud-native formats (GeoParquet, PMTiles, H3 hex Parquet) using the cng-datasets CLI and NRP Kubernetes. Covers the full workflow: URL verification, raw S3 upload, YAML generation, cluster deployment, monitoring, and documentation. Use when processing any geospatial dataset in the data-workflows repo, or when working with the cng-datasets CLI."
 license: Apache-2.0
-compatibility: "Requires uv/pip for local CLI install, kubectl for NRP Nautilus cluster. `--namespace` still defaults to `biodiversity`, but current dataset workflows run in `geo-workflows` — pass it explicitly. See nrp-k8s and nrp-s3 skills for cluster/S3 details."
+compatibility: "Requires uv/pip for local CLI install, kubectl for NRP Nautilus cluster. `--namespace` still defaults to `biodiversity`, but current dataset workflows run in `geo-workflows` — pass it explicitly. See nrp-kubernetes and nrp-s3 skills for cluster/S3 details."
 metadata:
   author: boettiger-lab
   version: "1.0"
