@@ -118,13 +118,13 @@ Pods must use what they request. The NRP portal checks running pods every 10 min
 
 **The limit is 4 pods per user across all namespaces.** A user may have no more than 4 pods outside the ranges, counted over every namespace they use (`biodiversity`, `geo-workflows`, `schmidtdse`, …). Past that, the admission webhook `deployment.nrp-nautilus.io` denies every Deployment change on the account, including restarts of small exempt apps, with "Your pods resources utilization is too low for account …". Namespaces that keep requesting more than they use risk being banned. When a restart is denied this way, the cause is almost always a batch job in another namespace, not the app being restarted.
 
-**Limits must stay close to requests.** NRP separately enforces a limit/request ratio (`container-must-meet-memory-and-cpu-ratio`). A memory limit 1.5 times the request has been rejected, and 1.2 times passes.
+**Limits may be far above requests.** Small requests with large limits are fine and let servers burst. A ratio-rule rejection usually means a malformed request or limit; check with `kubectl apply --dry-run=server` rather than shrinking limits.
 
 ### Priority and sizing for batch jobs
 
 - **Pods that run under about an hour** use `priorityClassName: opportunistic`. They are exempt from the usage check, and a preempted pod costs little to redo. This covers setup jobs, daily CronJob runs and short fan-out units.
 - **Long work** is split into short units where that is practical, so it can run at opportunistic. Multi-hour pods at opportunistic are preempted repeatedly.
-- **Pods that must run long** use default priority, and their requests are sized to measured use: memory 20–150% of the request, CPU 20–200%, and the limit no more than about 1.2 times the request. Check them about 30 minutes after launch, before the portal does, and keep the job under the 4-pod limit.
+- **Pods that must run long** use default priority, and their requests are sized to measured use: memory 20–150% of the request, CPU 20–200%. Check them about 30 minutes after launch, before the portal does, and keep the job under the 4-pod limit.
 
 ### Checking usage
 
@@ -145,7 +145,7 @@ Full policy: https://nrp.ai/documentation/userdocs/start/policies/ — per-user 
 
 ## Batch Job Requirements
 
-CPU jobs whose pods run under about an hour use `priorityClassName: opportunistic` (see Usage policy for longer pods). All jobs need explicit resource requests and limits, with the limit at most about 1.2 times the request, and `restartPolicy: Never`. GPU node avoidance is recommended:
+CPU jobs whose pods run under about an hour use `priorityClassName: opportunistic` (see Usage policy for longer pods). All jobs need explicit resource requests and limits, and `restartPolicy: Never`. GPU node avoidance is recommended:
 
 ```yaml
 apiVersion: batch/v1
