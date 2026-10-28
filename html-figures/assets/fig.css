@@ -1,0 +1,11 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+:root{
+  --ink:#0f172a; --ink2:#475569; --muted:#94a3b8; --line:#e2e8f0; --bg:#ffffff; --panel:#f8fafc;
+  --science:#eb6834; --curation:#2a78d6; --services:#1baf7a; --access:#eda100; --source:#64748b;
+  --navy:#0f1f3a;
+}
+html,body{margin:0;padding:0;background:var(--bg)}
+#fig{display:inline-block;font-family:Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg);
+  -webkit-font-smoothing:antialiased;box-sizing:border-box}
+#fig *{box-sizing:border-box}
+.ic{width:1em;height:1em;stroke-width:2;flex:none}

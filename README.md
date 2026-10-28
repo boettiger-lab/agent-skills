@@ -16,7 +16,8 @@ hold everywhere, that no single repo would own, and that go stale slowly:
 
 | Skill | Why global |
 |-------|------------|
-| `no-ai-attribution` | Authorship policy. Applies to every commit in every repo. |
+| `disclose-tool-use` | Authorship policy: Claude is a tool, never credited; disclose in `DISCLOSURE.md`. Applies to every repo. |
+| `human-communication-consent` | Every message other people will see goes through Carl's OK first. Applies everywhere. |
 | `k8s-never-force-delete` | Destructive-action guard. Wanted wherever a cluster is reachable. |
 | `python-env` | "Never install into system Python." True everywhere; 30 lines. |
 
@@ -52,7 +53,7 @@ goes stale in exactly the way the code does not.
 ```bash
 mkdir -p ~/.claude/skills
 git clone https://github.com/boettiger-lab/agent-skills /tmp/agent-skills
-for s in no-ai-attribution k8s-never-force-delete python-env; do
+for s in disclose-tool-use human-communication-consent k8s-never-force-delete python-env; do
   cp -r /tmp/agent-skills/$s ~/.claude/skills/
 done
 ```
@@ -96,7 +97,10 @@ Rule-shaped, install globally:
 
 | Skill | For |
 |-------|-----|
-| `no-ai-attribution` | Claude is a tool, never an author or co-author |
+| `disclose-tool-use` | Claude is a tool, never an author or co-author; disclose use in `DISCLOSURE.md` |
+| `human-communication-consent` | PRs, issues, comments and messages to others need Carl's OK first |
+| `pod-resources` | Read the container's real CPU and memory before sizing parallel work |
+| `stacked-pr-squash-merge` | Merging stacked or dependent PRs without losing commits |
 | `k8s-never-force-delete` | Never force-delete; diagnose stuck resources instead |
 | `python-env` | Never install into or run the system Python |
 
@@ -106,6 +110,14 @@ Cross-repo, install globally only if you route between repos often:
 |-------|-----|
 | `boettiger-lab-stack` | Which repo owns which piece of the data → STAC → MCP → agent chain |
 
+Carl's writing and figure conventions, install globally where you write for him:
+
+| Skill | For |
+|-------|-----|
+| `writing-voice` | Titles, headings, labels and prose in Carl's voice |
+| `reproducible-reports` | Reports as pandoc + LaTeX PDF from markdown, scripts in the repo |
+| `html-figures` | Conceptual figures authored in HTML/CSS and rendered to PNG and PDF |
+
 Domain knowledge — copy into the repo it serves:
 
 | Skill | Belongs with |
@@ -113,7 +125,7 @@ Domain knowledge — copy into the repo it serves:
 | `cng-datasets` | `datasets` / `data-workflows` |
 | `duckdb-spatial` | any repo querying spatial parquet |
 | `gdal-spatial` | `datasets`, `data-workflows` |
-| `nrp-k8s` | any repo deploying to Nautilus |
+| `nrp-kubernetes` | any repo running jobs or deployments on Nautilus (bad nodes, usage policy, ingress, secrets) |
 | `nrp-s3` | any repo writing to Ceph S3 |
 | `stac-navigation` | `data-workflows`, `mcp-data-server` |
 | `oci-artifacts` | whichever repo ships large artifacts |

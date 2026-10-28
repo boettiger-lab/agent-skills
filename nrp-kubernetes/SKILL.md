@@ -1,12 +1,106 @@
 ---
-name: nrp-k8s
-description: "Deploy and manage workloads on the NRP Nautilus Kubernetes cluster. Covers batch jobs (opportunistic priority class, resource requests, GPU node avoidance), ingress with HAProxy CORS and timeout annotations, NRP usage policies, and credential wiring. TRIGGER when the user mentions: kubectl, k8s, kubernetes, NRP, Nautilus, rollout, restart deployment, apply yaml, pod, job, namespace, ingress, or any cluster operation. Namespace is 'biodiversity'. Always load this skill BEFORE running any kubectl command."
-license: Apache-2.0
+name: nrp-kubernetes
+description: >
+  Operating the NRP (National Research Platform / Nautilus) shared Kubernetes
+  cluster with kubectl — deployments, pods, configmaps, rollouts, and diagnosing
+  bad rollouts. Use whenever running kubectl against NRP (namespaces such as
+  `biodiversity`, `geo-workflows` and `schmidtdse`). #1 safety rule: NEVER
+  force-delete pods. A pod stuck in ContainerCreating or pulling an image for
+  more than ~5 minutes is a bad node: gracefully delete it, never wait it out.
+  Also covers batch Job requirements, secrets wiring, HAProxy ingress (CORS,
+  timeouts), the dedicated Berkeley node, and NRP's pod usage policy (CPU/memory/GPU use vs
+  request, the small-pod exemption, the 4-pod limit) and check-usage.py; read it
+  before launching a batch job or when a rollout is denied with "utilization is
+  too low".
+metadata:
+  author: boettiger-lab
+  version: "1.3"
 ---
 
-# NRP Kubernetes
+# NRP Nautilus — kubectl operations
 
-Shared academic cluster. Namespace: `biodiversity`. [Usage policies](https://nrp.ai/documentation/userdocs/start/policies/) — key rules: no `sleep` in jobs, pods must use what they request (see Usage policy below), no interactive pods >6h.
+NRP Nautilus is a **shared, multi-tenant** academic cluster. Be a good neighbor.
+
+## ⛔ NEVER force-delete a pod
+
+**Do not** run `kubectl delete pod ... --force --grace-period=0` (or `--force`).
+
+Force-delete removes the pod from the API server *before* the kubelet confirms the
+container stopped. On a shared cluster this:
+- **orphans the container** — it can keep running on the node, consuming resources;
+- **corrupts StatefulSet / RWO-PVC workloads** — the volume can end up
+  double-mounted or two copies running at once;
+- **violates NRP etiquette** and hides real problems.
+
+If a pod is stuck `Terminating`, **investigate** (`describe`, events, node health)
+or wait it out; escalate to NRP admins on Matrix. Never force.
+
+## To reschedule a pod off a bad node — normal delete
+
+A crashlooping/stuck pod caused by a **node** problem (DNS timeout, bad mount) is
+fixed by a plain graceful delete — the controller recreates it, often on a healthy
+node:
+
+```bash
+kubectl delete pod <pod> -n <ns>      # NO --force, NO --grace-period=0
+```
+
+### ⛔ A pod stuck in `ContainerCreating` / `Pulling` is a bad node — delete it, do not wait
+
+On NRP an image pull that has not finished after **~5 minutes** is a network or DNS fault on
+that node, not a slow download. It does not recover: on 2026-10-26 an orchestrator pod sat in
+`Pulling image "bitnami/kubectl:latest"` on `nrp-00.rcac.purdue.edu` for 4 hours until the
+runner's timeout killed it. One graceful delete would have cost a minute.
+
+```bash
+kubectl -n <ns> get pods | grep -E 'ContainerCreating|Pending'          # age > ~5 min?
+kubectl -n <ns> describe pod <pod> | grep -E '^Node:|Pulling|Failed|Back-off'
+kubectl -n <ns> delete pod <pod>                                        # graceful; the Job recreates it
+```
+
+If the replacement lands on the same node and hangs again, keep the workload off that node
+with a `kubernetes.io/hostname NotIn [...]` node affinity (several manifests in
+data-workflows already exclude known broken-egress hosts this way).
+
+**Never let a script wait hours on a pod that never started.** A runner that only waits for
+`Complete` with a long timeout turns a one-minute bad-node fix into a lost afternoon. Watch for
+the stuck state explicitly and act on it:
+
+```bash
+# inside a wait loop: any pod of the job still not running after 5 min -> bad node, reschedule it
+kubectl -n <ns> get pods -l job-name=<job> -o json | python3 -c '
+import json, sys, datetime as d
+now = d.datetime.now(d.timezone.utc)
+for p in json.load(sys.stdin)["items"]:
+    cs = (p["status"].get("containerStatuses") or [{}])[0].get("state", {})
+    age = (now - d.datetime.fromisoformat(p["metadata"]["creationTimestamp"].replace("Z", "+00:00"))).total_seconds()
+    if "waiting" in cs and age > 300: print(p["metadata"]["name"])' | xargs -r kubectl -n <ns> delete pod
+```
+
+The old ReplicaSet keeps serving until the new pod is `Ready`, so a crashlooping
+*new* pod during a rollout is usually **not yet an outage**.
+
+## Everyday ops
+
+- **Always pass `-n <namespace>`.** Our apps live in `biodiversity` (and
+  `schmidtdse` for some SchmidtDSE apps). Nothing is in `default`.
+- **Config change → apply + restart:**
+  ```bash
+  kubectl apply -f k8s/configmap.yaml -n <ns>
+  kubectl rollout restart deployment/<name> -n <ns>
+  kubectl rollout status  deployment/<name> -n <ns> --timeout=90s
+  ```
+  Pods re-render `config.json` (envsubst) at start, so a restart is required for a
+  ConfigMap change to take effect.
+- **Deployment name ≠ repo name.** Check first: `kubectl get deploy -n <ns>`.
+  (e.g. the geo-agent template deploys as `padus`; biodiversity as
+  `biodiversity-maplibre`.)
+- **Diagnose a bad rollout:**
+  ```bash
+  kubectl get pods -n <ns>
+  kubectl describe pod <pod> -n <ns>            # State/Reason/Events
+  kubectl logs <pod> -n <ns> -c <initContainer> # git-clone init failures show here
+  ```
 
 ## Usage policy
 
@@ -86,7 +180,7 @@ spec:
               memory: "8Gi"
 ```
 
-Add `ephemeral-storage: "250Gi"` to requests/limits if scratch disk is needed.
+Add `ephemeral-storage` to requests/limits sized to the scratch disk the job needs. In `geo-workflows` 50Gi is only the LimitRange default, not a cap; larger requests are admitted, and node free disk is the real ceiling.
 
 ## Secrets
 
@@ -187,3 +281,12 @@ kubectl -n biodiversity delete pod <stuck-pod>
 4. **`rollout restart` without `kubectl apply`** — config changes won't take effect
 5. **nginx ingress annotations** — NRP uses HAProxy; nginx annotations are silently ignored
 6. **Max 200 completions per indexed job** — hard cluster limit
+
+## Don'ts
+
+- No `--force` / `--grace-period=0` on pods (see above).
+- Don't `kubectl delete` PVCs, StatefulSets, or Namespaces casually — data loss.
+- Don't request more CPU/memory than you use (see Usage policy); don't schedule
+  CPU work onto GPU nodes.
+- Don't edit live objects with `kubectl edit` for tracked apps — change the
+  manifest in the repo and `kubectl apply`, so git stays authoritative.
