@@ -16,7 +16,7 @@ description: >
   too low".
 metadata:
   author: boettiger-lab
-  version: "1.5"
+  version: "1.6"
 ---
 
 # NRP Nautilus — kubectl operations
@@ -310,6 +310,25 @@ rescheduled. Armada's value is microslicing (thousands of short units past the i
 completion cap). The full guidance is in boettiger-lab/data-workflows: the `armada-pipeline`
 and `pod-preemption` skills and the priority section of its `AGENTS.md`, which also asks for
 limit ≤ 1.2× request on default-priority pods.
+
+**NRP's Armada kills every pod at 6 hours, and the job cannot change that.** NRP's executor sets
+`activeDeadlineSeconds: 21600` on every pod it creates. When the pod reaches it, Kubernetes stops
+the pod with `DeadlineExceeded` ("Pod was active on the node longer than the specified deadline",
+exit 137).
+- On 2026-11-17 two test jobs settled this. One set `activeDeadlineSeconds: 86400` and one set
+  none. The job records showed 86400 and the server default of 259200 (72 h), but both pods ran
+  with 21600.
+- That same day the limit killed two benchmark workers mid-segment at exactly 6h00m.
+- NRP's docs do not mention the limit.
+
+What follows from it:
+- Keep each Armada job well under 6 h of running time.
+- A worker that loops over many units is killed mid-unit at 6 h. Make units resumable, and write
+  progress to S3 as it goes.
+- Run anything that must live longer than 6 h as an ordinary k8s Job, which has no injected
+  deadline. Size it to meet the usage policy.
+- Small jobs can also wait in Armada's queue for half an hour before they get a pod (about 29 min
+  on 2026-11-17).
 
 To discover taints on other nodes, check the scheduler error from a pending pod: `kubectl -n biodiversity describe pod <pod>` — the message lists every untolerated taint verbatim. Use exact `key`/`value` pairs (not `operator: Exists` globally — the admission webhook may reject it).
 
