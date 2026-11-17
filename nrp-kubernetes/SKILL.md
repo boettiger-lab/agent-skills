@@ -9,12 +9,13 @@ description: >
   more than ~5 minutes is a bad node: gracefully delete it, never wait it out.
   Also covers batch Job requirements, secrets wiring, HAProxy ingress (CORS,
   timeouts), the dedicated Berkeley node, and NRP's pod usage policy (CPU/memory/GPU use vs
-  request, the small-pod exemption, the 4-pod limit) and check-usage.py; read it
+  request, the small-pod exemption, and the zero-violation rule: the 4-pod grace is
+  not an allowance) and check-usage.py; read it
   before launching a batch job or when a rollout is denied with "utilization is
   too low".
 metadata:
   author: boettiger-lab
-  version: "1.3"
+  version: "1.4"
 ---
 
 # NRP Nautilus — kubectl operations
@@ -116,7 +117,11 @@ Pods must use what they request. The NRP portal checks running pods every 10 min
 
 **Never checked:** opportunistic (negative-priority) pods, JupyterHub pods, and pods younger than 30 minutes.
 
-**The limit is 4 pods per user across all namespaces.** A user may have no more than 4 pods outside the ranges, counted over every namespace they use (`biodiversity`, `geo-workflows`, `schmidtdse`, …). Past that, the admission webhook `deployment.nrp-nautilus.io` denies every Deployment change on the account, including restarts of small exempt apps, with "Your pods resources utilization is too low for account …". Namespaces that keep requesting more than they use risk being banned. When a restart is denied this way, the cause is almost always a batch job in another namespace, not the app being restarted.
+**Zero pods outside the policy, at all times.** Every pod we run must stay inside these ranges or be exempt. A pod in violation is never acceptable, not even one, not even briefly.
+
+NRP gives each user a **grace of 4 violating pods**, counted across every namespace they use (`biodiversity`, `geo-workflows`, `schmidtdse`, …). The grace is not an allowance and not a budget to spend: it exists so an honest mistake does not immediately lock the account. Treat any violation as an incident and fix it at once.
+- Past the grace, the admission webhook `deployment.nrp-nautilus.io` denies every Deployment change on the account, including restarts of small exempt apps, with "Your pods resources utilization is too low for account …". When a restart is denied this way, the cause is almost always a batch job in another namespace, not the app being restarted.
+- Violating regularly, even within the grace, can get the account and its namespaces banned from NRP.
 
 **Limits may be far above requests.** Small requests with large limits are fine and let servers burst. A ratio-rule rejection usually means a malformed request or limit; check with `kubectl apply --dry-run=server` rather than shrinking limits.
 
@@ -124,7 +129,7 @@ Pods must use what they request. The NRP portal checks running pods every 10 min
 
 - **Pods that run under about an hour** use `priorityClassName: opportunistic`. They are exempt from the usage check, and a preempted pod costs little to redo. This covers setup jobs, daily CronJob runs and short fan-out units.
 - **Long work** is split into short units where that is practical, so it can run at opportunistic. Multi-hour pods at opportunistic are preempted repeatedly.
-- **Pods that must run long** use default priority, and their requests are sized to measured use: memory 20–150% of the request, CPU 20–200%. Check them about 30 minutes after launch, before the portal does, and keep the job under the 4-pod limit.
+- **Pods that must run long** use default priority, and their requests are sized to measured use: memory 20–150% of the request, CPU 20–200%. Check them about 30 minutes after launch, before the portal does. Any pod outside the ranges is a violation to fix immediately (resize it, or stop it); the 4-pod grace is not room to run in.
 
 ### Checking usage
 
@@ -275,7 +280,7 @@ kubectl -n biodiversity delete pod <stuck-pod>
 
 ## Common Pitfalls
 
-1. **Default priority with oversized requests** — a pod above 1 core or 2 GiB that uses less than 20% of its request counts against the 4-pod limit, and past that NRP blocks every Deployment change on the account. Use opportunistic for short pods, and size long ones to measured use
+1. **Default priority with oversized requests** — a pod above 1 core or 2 GiB that uses less than 20% of its request is a violation. Zero violations is the rule: NRP's 4-pod grace only delays the lockout of every Deployment change on the account, and repeated violations risk a ban. Use opportunistic for short pods, and size long ones to measured use
 2. **Missing resource requests/limits** — pod won't schedule
 3. **`sleep` in batch jobs** — policy violation, grounds for ban
 4. **`rollout restart` without `kubectl apply`** — config changes won't take effect
