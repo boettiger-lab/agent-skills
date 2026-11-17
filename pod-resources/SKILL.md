@@ -1,6 +1,6 @@
 ---
 name: pod-resources
-description: Read the CPUs and memory actually available to this container before running parallel or memory-heavy work. Use before sizing any multiprocessing pool, parallel sweep, make -j, or large in-memory job. Allocations change, so never rely on remembered core or RAM numbers; query the cgroup each time.
+description: Read the CPUs and memory actually available to this container. `nproc` prints 1 here because OMP_NUM_THREADS=1, which is wrong; never use it. Use whenever you count cores, before sizing any multiprocessing pool, parallel sweep, make -j, or large in-memory job, and before blaming slowness on CPU contention (check `top` for idle CPU first). Allocations change, so never rely on remembered core or RAM numbers; query the cgroup each time.
 ---
 
 # Sizing parallel work to the container

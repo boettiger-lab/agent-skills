@@ -103,6 +103,7 @@ Rule-shaped, install globally:
 | `stacked-pr-squash-merge` | Merging stacked or dependent PRs without losing commits |
 | `k8s-never-force-delete` | Never force-delete; diagnose stuck resources instead |
 | `python-env` | Never install into or run the system Python |
+| `jupyter-preview-links` | Give Carl previews and links as full literal URLs his JupyterHub terminal can click |
 
 Cross-repo, install globally only if you route between repos often:
 
@@ -127,6 +128,8 @@ Domain knowledge — copy into the repo it serves:
 | `gdal-spatial` | `datasets`, `data-workflows` |
 | `nrp-kubernetes` | any repo running jobs or deployments on Nautilus (bad nodes, usage policy, ingress, secrets) |
 | `nrp-s3` | any repo writing to Ceph S3 |
+| `cirrus-armada` | any repo running batch jobs on the lab's cirrus cluster (Armada queue, nodes, MinIO) |
+| `jupyterhub-user-config` | `k8s`, `nautilus` and the rocker images: per-user hub settings such as git identity |
 | `stac-navigation` | `data-workflows`, `mcp-data-server` |
 | `oci-artifacts` | whichever repo ships large artifacts |
 | `github-app-auth` | wherever the bot account pushes |
