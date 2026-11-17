@@ -8,14 +8,15 @@ description: >
   force-delete pods. A pod stuck in ContainerCreating or pulling an image for
   more than ~5 minutes is a bad node: gracefully delete it, never wait it out.
   Also covers batch Job requirements, secrets wiring, HAProxy ingress (CORS,
-  timeouts), the dedicated Berkeley node, and NRP's pod usage policy (CPU/memory/GPU use vs
+  timeouts), NRP's block on pod traffic between namespaces (a call to
+  <svc>.<other-ns>.svc.cluster.local times out; use the public https ingress), the dedicated Berkeley node, and NRP's pod usage policy (CPU/memory/GPU use vs
   request, the small-pod exemption, and the zero-violation rule: the 4-pod grace is
   not an allowance) and check-usage.py; read it
   before launching a batch job or when a rollout is denied with "utilization is
   too low".
 metadata:
   author: boettiger-lab
-  version: "1.4"
+  version: "1.5"
 ---
 
 # NRP Nautilus — kubectl operations
@@ -248,18 +249,67 @@ spec:
 
 Add `mcp-session-id` to `cors-allow-headers` for MCP servers.
 
+## Namespace isolation: pods cannot reach Services in other namespaces
+
+NRP now blocks pod traffic between namespaces with a cluster-level policy. A pod
+in `schmidtdse` cannot reach `<svc>.boettiger-lab.svc.cluster.local` or
+`<svc>.biodiversity.svc.cluster.local`. Traffic within one namespace and to
+cluster DNS still works.
+
+**Symptom: a timeout, not a refusal.** The packets are dropped, so clients hang
+until their own timeout. DuckDB reports `Timeout was reached` after 120 s, and
+nginx reports `upstream timed out`. Neither namespace shows a NetworkPolicy that
+explains it: NRP enforces the block with AdminNetworkPolicy/Calico objects that
+our account cannot list (`kubectl get adminnetworkpolicies` is Forbidden).
+Observed 2026-11-10: wallacea-mcp (`schmidtdse`) timed out on every read from
+rustfs (`rustfs-s3.boettiger-lab`). The same request succeeded in about 1 s
+through rustfs's public ingress, and both pods were healthy on the same node.
+
+**Fix: call the other service through its public https ingress**, e.g.
+`https://rustfs.nrp-nautilus.io` instead of `http://rustfs-s3.boettiger-lab.svc.cluster.local`.
+For an S3 client that means the public host and `use_ssl=true`. If the service has
+no ingress, run the caller in the service's own namespace. Don't ask for an
+exception before trying this.
+
+- **Exception seen:** NRP's internal Ceph RGW (`rook-ceph-rgw-nautiluss3.rook`)
+  was still reachable from `schmidtdse` on 2026-11-10. Our own MCP egress policies
+  block it anyway, and those servers use `s3-west.nrp-nautilus.io`.
+- **Check before wiring a cross-namespace call:** grep app configs for
+  `.svc.cluster.local` hosts outside the app's own namespace. Each such host is
+  broken under this policy.
+- **A NetworkPolicy of ours cannot open it.** Our policies only narrow what NRP
+  allows. An egress rule naming another namespace's pods does nothing against
+  the cluster-level block.
+
 ## Dedicated Node
 
-`stratus1.nrp-espm.berkeley.edu` is our Berkeley-owned node — use when jobs get preempted on shared nodes. It carries a `nautilus.io/issue` taint; tolerate it with `operator: Exists`:
+`stratus1.nrp-espm.berkeley.edu` is Berkeley-owned, but as of 2026-11-04 it is an ordinary
+shared node: its only taint is the soft GPU taint (`nvidia.com/gpu=Exists:PreferNoSchedule`),
+it carries pods from many other namespaces, and it has 2 GPUs (124 CPUs, ~1.5 TiB). It no
+longer offers protection from preemption. Check its taints before relying on it; node objects
+are not readable with our account, but NRP's Prometheus is:
 
-```yaml
-nodeSelector:
-  kubernetes.io/hostname: stratus1.nrp-espm.berkeley.edu
-tolerations:
-  - key: "nautilus.io/issue"
-    operator: Exists
-    effect: NoSchedule
+```bash
+curl -s -G https://prometheus.nrp-nautilus.io/api/v1/query \
+  --data-urlencode 'query=kube_node_spec_taint{node="stratus1.nrp-espm.berkeley.edu"}'
 ```
+
+Long jobs that cannot meet the usage policy at default priority belong on Carl's own
+machines (nimbus/cirrus), not on an NRP node. Submit them through the lab's cirrus Armada queue
+(`armadactl -c cirrus`); see the `cirrus-armada` skill.
+
+## Armada on NRP
+
+This section is about NRP's Armada (`armadactl -c main`, the default context). The lab's own Armada on
+cirrus is a separate cluster with its own rules; use the `cirrus-armada` skill for it, and always pass `-c`.
+
+NRP's Armada queue is not a way around the usage policy or preemption. Every Armada priority
+class is positive, so the 20–200% CPU / 20–150% memory check applies to every Armada pod after
+30 minutes; only k8s `opportunistic` pods are exempt. Preempted Armada jobs are not
+rescheduled. Armada's value is microslicing (thousands of short units past the indexed-Job
+completion cap). The full guidance is in boettiger-lab/data-workflows: the `armada-pipeline`
+and `pod-preemption` skills and the priority section of its `AGENTS.md`, which also asks for
+limit ≤ 1.2× request on default-priority pods.
 
 To discover taints on other nodes, check the scheduler error from a pending pod: `kubectl -n biodiversity describe pod <pod>` — the message lists every untolerated taint verbatim. Use exact `key`/`value` pairs (not `operator: Exists` globally — the admission webhook may reject it).
 
@@ -286,6 +336,7 @@ kubectl -n biodiversity delete pod <stuck-pod>
 4. **`rollout restart` without `kubectl apply`** — config changes won't take effect
 5. **nginx ingress annotations** — NRP uses HAProxy; nginx annotations are silently ignored
 6. **Max 200 completions per indexed job** — hard cluster limit
+7. **Calling a Service in another namespace** — NRP drops it and the client times out; use the service's public https ingress (see Namespace isolation)
 
 ## Don'ts
 
