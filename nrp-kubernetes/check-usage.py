@@ -5,8 +5,10 @@ A running pod is outside the policy when its use falls outside these ranges of
 its request: GPU above 40%, CPU 20%-200%, memory 20%-150%. CPU is checked only
 on pods requesting more than 1 core, memory only on pods requesting more than
 2 GiB. Opportunistic (negative-priority) pods, JupyterHub pods and pods younger
-than 30 minutes are not checked. A user may have at most 4 pods outside the
-ranges across all their namespaces.
+than 30 minutes are not checked. The rule is zero pods outside the ranges: NRP's
+grace of 4 violating pods per user (across all namespaces) only delays the
+lockout, and repeated violations can get the account banned. Any pod this
+reports must be fixed at once.
 
 Pod specs come from kubectl; use comes from NRP's Prometheus, averaged over the
 last 30 minutes. The portal's own measurement may differ in detail, so treat a
@@ -25,7 +27,7 @@ from datetime import datetime, timezone
 PROM = "https://prometheus.nrp-nautilus.io/api/v1/query"
 DEFAULT_NAMESPACES = ["biodiversity", "geo-workflows", "schmidtdse"]
 GIB = 1024 ** 3
-ALLOWANCE = 4
+GRACE = 4   # NRP's grace before lockout. Not an allowance: the target is zero.
 MIN_AGE_MIN = 30
 WINDOW = "30m"
 
@@ -135,7 +137,7 @@ def main():
     print(f"Checked pods (above 1 core or 2 GiB, at least {MIN_AGE_MIN} min old, not opportunistic): {len(checked)}")
     for row in checked:
         print("  " + row)
-    print(f"Outside the policy: {len(outside)} (allowance {ALLOWANCE} across all namespaces)")
+    print(f"Outside the policy: {len(outside)} (must be 0; NRP locks the account past {GRACE}, and repeated violations risk a ban)")
     for row in outside:
         print("  " + row)
     return 1 if outside else 0
