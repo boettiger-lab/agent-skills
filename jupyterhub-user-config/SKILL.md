@@ -69,8 +69,7 @@ rocker/ml) get none of this, and may set their own identity in `/etc/gitconfig`.
   `GitHubOAuthenticator` section.
 - **Berkeley datahub (berkeley-dsep-infra/datahub):** never push upstream. Branch on
   Carl's fork `cboettig/datahub` and PR against upstream, as in
-  https://github.com/berkeley-dsep-infra/datahub/pull/8422. Read the
-  `human-communication-consent` skill first. Shared `hub/values.yaml` uses
+  https://github.com/berkeley-dsep-infra/datahub/pull/8422. Shared `hub/values.yaml` uses
   `CanvasOAuthenticator` (bCourses); per-deployment config is
   `deployments/<hub>/config/common.yaml`. Campus staff may not adopt per-image config,
   so prefer fixes that live in the image.
