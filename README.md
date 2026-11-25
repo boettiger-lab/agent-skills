@@ -17,7 +17,6 @@ hold everywhere, that no single repo would own, and that go stale slowly:
 | Skill | Why global |
 |-------|------------|
 | `disclose-tool-use` | Authorship policy: Claude is a tool, never credited; disclose in `DISCLOSURE.md`. Applies to every repo. |
-| `human-communication-consent` | Every message other people will see goes through Carl's OK first. Applies everywhere. |
 | `k8s-never-force-delete` | Destructive-action guard. Wanted wherever a cluster is reachable. |
 | `python-env` | "Never install into system Python." True everywhere; 30 lines. |
 
@@ -53,7 +52,7 @@ goes stale in exactly the way the code does not.
 ```bash
 mkdir -p ~/.claude/skills
 git clone https://github.com/boettiger-lab/agent-skills /tmp/agent-skills
-for s in disclose-tool-use human-communication-consent k8s-never-force-delete python-env; do
+for s in disclose-tool-use k8s-never-force-delete python-env; do
   cp -r /tmp/agent-skills/$s ~/.claude/skills/
 done
 ```
@@ -98,7 +97,6 @@ Rule-shaped, install globally:
 | Skill | For |
 |-------|-----|
 | `disclose-tool-use` | Claude is a tool, never an author or co-author; disclose use in `DISCLOSURE.md` |
-| `human-communication-consent` | PRs, issues, comments and messages to others need Carl's OK first |
 | `pod-resources` | Read the container's real CPU and memory before sizing parallel work |
 | `stacked-pr-squash-merge` | Merging stacked or dependent PRs without losing commits |
 | `k8s-never-force-delete` | Never force-delete; diagnose stuck resources instead |
