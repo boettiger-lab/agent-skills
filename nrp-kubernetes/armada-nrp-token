@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Print an OIDC token for armadactl's `execAuth` on NRP's Armada, caching it on disk.
+
+armadactl's built-in `openIdDeviceAuth` keeps its refresh token in the OS keyring. A JupyterHub
+container has no unlocked keyring, so every armadactl call there asks for a new device login. This
+helper keeps the tokens in a file instead, as armada-dex-token does for the lab's cirrus Armada.
+
+Cache: ~/.config/armada/nrp-token.json (directory 0700, file 0600).
+  - The token is reused until a minute before it expires, then renewed with the refresh token.
+  - Only when the refresh token is gone is a device login needed; its link goes to stderr.
+
+Endpoints come from the issuer's OpenID discovery document. Standard library only. Prints the token
+on stdout, everything else on stderr.
+  armada-nrp-token            print a token (log in first by running this on its own, in a shell
+                              that shows stderr; armadactl gives each call only a 10 s deadline)
+  armada-nrp-token --logout   delete the cache
+Env: ARMADA_NRP_TOKEN_TYPE=id|access (default id): which token armadactl sends.
+"""
+import base64, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+
+ISSUER = os.environ.get("ARMADA_NRP_ISSUER", "https://authentik.nrp-nautilus.io/application/o/armada/")
+CLIENT_ID = os.environ.get("ARMADA_NRP_CLIENT_ID", "8AeUAhsM1rA8WRJoX586BhJk8t5Icfrm169ESz8Y")
+SCOPES = "openid profile_prefixed offline_access"
+KIND = os.environ.get("ARMADA_NRP_TOKEN_TYPE", "id")
+CACHE = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                     "armada", "nrp-token.json")
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def get_json(url, data=None):
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(data).encode() if data else None,
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return json.load(e)
+        except ValueError:
+            raise SystemExit(f"armada-nrp-token: {url} returned HTTP {e.code}")
+
+
+def endpoints():
+    d = get_json(ISSUER.rstrip("/") + "/.well-known/openid-configuration")
+    return d["device_authorization_endpoint"], d["token_endpoint"]
+
+
+def exp(token):
+    try:
+        p = token.split(".")[1]
+        p += "=" * (-len(p) % 4)
+        return json.loads(base64.urlsafe_b64decode(p))["exp"]
+    except (IndexError, KeyError, ValueError):
+        return 0
+
+
+def load():
+    try:
+        with open(CACHE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save(tok, old_refresh=""):
+    os.makedirs(os.path.dirname(CACHE), mode=0o700, exist_ok=True)
+    tmp = CACHE + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"id_token": tok.get("id_token", ""), "access_token": tok.get("access_token", ""),
+                   "refresh_token": tok.get("refresh_token") or old_refresh,
+                   "saved_at": int(time.time())}, f)
+    os.replace(tmp, CACHE)
+
+
+def device_login(device_url, token_url):
+    code = get_json(device_url, {"client_id": CLIENT_ID, "scope": SCOPES})
+    if "device_code" not in code:
+        raise SystemExit(f"armada-nrp-token: device request failed: {code}")
+    log("NRP Armada login: open this link and approve:\n\n    "
+        + (code.get("verification_uri_complete") or code["verification_uri"]) + "\n")
+    deadline, interval = time.time() + code.get("expires_in", 300), code.get("interval", 5)
+    while time.time() < deadline:
+        time.sleep(interval)
+        tok = get_json(token_url, {"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                                   "device_code": code["device_code"], "client_id": CLIENT_ID})
+        if "access_token" in tok:
+            return tok
+        err = tok.get("error")
+        if err == "slow_down":
+            interval += 5
+        elif err != "authorization_pending":
+            raise SystemExit(f"armada-nrp-token: login failed: {err}")
+    raise SystemExit("armada-nrp-token: login link expired; run it again")
+
+
+def main():
+    if sys.argv[1:] == ["--logout"]:
+        try:
+            os.remove(CACHE)
+        except FileNotFoundError:
+            pass
+        log("armada-nrp-token: cache removed")
+        return
+    key = "id_token" if KIND == "id" else "access_token"
+    cached, tok = load(), None
+    if exp(cached.get(key, "")) > time.time() + 60:
+        tok = cached
+    elif cached.get("refresh_token"):
+        _, token_url = endpoints()
+        t = get_json(token_url, {"grant_type": "refresh_token", "refresh_token": cached["refresh_token"],
+                                 "client_id": CLIENT_ID})
+        if "access_token" in t:
+            save(t, cached["refresh_token"])
+            tok = load()
+    if not tok:
+        device_url, token_url = endpoints()
+        save(device_login(device_url, token_url))
+        tok = load()
+    print(tok[key])
+
+
+if __name__ == "__main__":
+    main()
