@@ -26,6 +26,11 @@ NRP for large fan-outs of short units.
 
 - There is no kubectl access to cirrus from the Jupyter pod. Carl applies cirrus kubectl himself, including
   creating secrets in `armada-jobs`.
+- armadactl logs in through `armada-dex-token` (in `/usr/local/bin`, built into the hub images by boettiger-lab/k8s),
+  which caches the Dex tokens in `~/.config/armada/dex-token.json`.
+  The cache lapses after 7 days unused or 30 days in total, and then armadactl asks for a device login.
+  Its link does not display inside Claude Code, so Carl runs `armada-dex-token` in another shell and approves it.
+  Using cirrus at least weekly keeps the login alive.
 - Do not use the pod's service-account token.
 - Problems with the cluster itself (scheduler, executor, nodes) go to Carl or his armada agent. Do not work
   around them by hand.
@@ -65,7 +70,8 @@ jobs:
 - Generate specs from a task list with a script rather than writing them by hand. hexplanner's
   `scripts/armada_cirrus.py` is a worked example: one job per TSV line, the source tarball uploaded to MinIO
   and unpacked at start, results uploaded at the end.
-- Set requests equal to limits. Size memory from measured peaks. Oversized memory requests are what keep jobs
+- Set requests equal to limits. The server rejects a container whose memory request is below 1Gi
+  ("below server minimum (1Gi)"). Size memory from measured peaks. Oversized memory requests are what keep jobs
   queued, because the queue has a total memory cap.
 - Record the node and the CPU model in each job's output (`NODE_NAME`, `/proc/cpuinfo`) so results can be
   attributed to hardware.
@@ -98,8 +104,8 @@ jobs:
 
 ## Job state
 
-- `armadactl -c cirrus watch cboettig <jobset> --raw` streams the job set's event history, one JSON event per
-  line, and then waits. Run it under `timeout` and parse the history: `JobSubmittedEvent` carries the
+- `armadactl -c cirrus watch cboettig <jobset> --raw` streams the job set's event history, one event per
+  line as `*api.<Type>Event {json}` (strip the prefix before parsing the JSON), and then waits. Run it under `timeout` and parse the history: `JobSubmittedEvent` carries the
   annotations, `JobRunningEvent` the node, `JobFailedEvent` the reason (`OOMKilled` means the memory limit was
   hit). hexplanner's `scripts/armada_status.py` summarizes job sets this way.
 - `armadactl -c cirrus get queue-report cboettig` shows the last scheduling round and the allocated

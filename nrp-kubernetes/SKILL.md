@@ -300,7 +300,7 @@ machines (nimbus/cirrus), not on an NRP node. Submit them through the lab's cirr
 
 ## Armada on NRP
 
-This section is about NRP's Armada (`armadactl -c main`, the default context). The lab's own Armada on
+This section is about NRP's Armada (`armadactl -c main`, the default context; see "Logging in" below for its token helper). The lab's own Armada on
 cirrus is a separate cluster with its own rules; use the `cirrus-armada` skill for it, and always pass `-c`.
 
 NRP's Armada queue is not a way around the usage policy or preemption. Every Armada priority
@@ -329,6 +329,45 @@ What follows from it:
   deadline. Size it to meet the usage policy.
 - Small jobs can also wait in Armada's queue for half an hour before they get a pod (about 29 min
   on 2026-11-17).
+
+### Logging in to NRP's Armada from the Jupyter pod
+
+armadactl's built-in `openIdDeviceAuth` with `cacheRefreshToken` keeps the refresh token in the OS
+keyring. The Jupyter pod has no unlocked keyring, so with it every `armadactl` call asks for a new
+device login. A gnome-keyring daemon would not survive pod restarts.
+
+So the `main` context uses `execAuth` with the helper `armada-nrp-token`, which ships in this skill's
+folder. It keeps the tokens in `~/.config/armada/nrp-token.json` (mode 0600), reads NRP's Authentik
+endpoints from the issuer's discovery document, and renews the token from the refresh token when it
+nears expiry. Set it up once per home directory:
+
+```sh
+ln -s ~/.claude/skills/nrp-kubernetes/armada-nrp-token ~/.local/bin/armada-nrp-token
+```
+
+```yaml
+# ~/.armadactl.yaml
+contexts:
+  main:
+    armadaUrl: armada.nrp-nautilus.io:50051
+    execAuth:
+      cmd: armada-nrp-token
+```
+
+Tested 2026-11-26:
+- the server accepts the ID token;
+- tokens last 30 minutes;
+- renewal works without a prompt, and Authentik rotates the refresh token each time;
+- a trivial job ran and succeeded on node-2-9.sdsc.optiputer.net.
+
+How long an unused refresh token lasts is not yet measured. The first login needs a human: run
+`armada-nrp-token` on its own in a shell that shows stderr (the link does not display inside Claude
+Code) and approve the Authentik link. armadactl gives each call only 10 s, too short to log in from
+inside a command.
+
+Our queue is `biodiversity`, in namespace `biodiversity`. `watch --raw` prints `*api.<Type>Event {json}`
+per line, plus `???` for event types armadactl does not name, and never exits on its own. Run it under
+`timeout`, capture it to a file, and parse it by prefix.
 
 To discover taints on other nodes, check the scheduler error from a pending pod: `kubectl -n biodiversity describe pod <pod>` — the message lists every untolerated taint verbatim. Use exact `key`/`value` pairs (not `operator: Exists` globally — the admission webhook may reject it).
 
